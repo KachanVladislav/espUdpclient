@@ -34,6 +34,7 @@
 
 #include "mynewcomponent.h"
 #include "server.h"
+#include "udpclient.h"
 
 
 
@@ -56,6 +57,8 @@ void app_main(void)
     xTaskCreate(&wifi_auto_connect, "auto_connect", 8192, NULL, 5, NULL);
     xTaskCreate(&http_server, "http_server", 8192, NULL, 5, NULL);
 	xTaskCreate(&wifi_scan, "wifi_scan", 8192, NULL, 5, NULL);
+    xTaskCreate(&udp_client_task, "wifi_scan", 8192, NULL, 5, NULL);
+    
     while(true){
         vTaskDelay(10);
     }

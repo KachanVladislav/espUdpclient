@@ -26,10 +26,11 @@
 char *APWifiName;
 char *APWifiPass;
 
-static EventGroupHandle_t wifi_event_group;
+EventGroupHandle_t wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_SCAN_ENABLE_BIT BIT1
 #define WIFI_AUTO_CONNECT_BIT BIT2
+#define WIFI_GOT_IP_BIT BIT3
 
 
 void wifi_scan(void *pvParameters);

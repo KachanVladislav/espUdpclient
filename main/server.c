@@ -146,13 +146,6 @@ void wifi_scan(void *pvParameters)
 void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
 {
-	printf("event_if = %d\n",event_id);
-	if(APWifiName!= NULL)
-	{
-		printf("%s\n",APWifiName);
-		printf("%s\n",APWifiPass);
-	}
-
 	EventBits_t wifi_group_status = xEventGroupGetBits(wifi_event_group);
 	switch(event_id)
 	{
@@ -170,7 +163,14 @@ void wifi_event_handler(void* arg, esp_event_base_t event_base,
 		case SYSTEM_EVENT_STA_START:
 			xEventGroupSetBits(wifi_event_group, WIFI_AUTO_CONNECT_BIT);
 		break;
-
+		case SYSTEM_EVENT_STA_GOT_IP:
+			printf("got ip\n");
+			vEventGroupSetBitsCallback(wifi_event_group, WIFI_GOT_IP_BIT);
+		break;
+		case SYSTEM_EVENT_STA_LOST_IP:
+			printf("lost ip\n");
+			vEventGroupClearBitsCallback(wifi_event_group, WIFI_GOT_IP_BIT);
+		break;
         case SYSTEM_EVENT_STA_DISCONNECTED:
 			
 			if((wifi_group_status & WIFI_CONNECTED_BIT )== 0)
@@ -235,7 +235,8 @@ void wifi_setup()
     }
 
 	wifi_event_group = xEventGroupCreate();
-	xEventGroupClearBits(wifi_event_group,WIFI_SCAN_ENABLE_BIT|WIFI_CONNECTED_BIT|WIFI_AUTO_CONNECT_BIT);
+	xEventGroupClearBits(wifi_event_group,WIFI_GOT_IP_BIT| WIFI_SCAN_ENABLE_BIT|
+											WIFI_CONNECTED_BIT|WIFI_AUTO_CONNECT_BIT);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
