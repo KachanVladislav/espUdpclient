@@ -11,9 +11,6 @@
 char *APWifiName;
 char *APWifiPass;
 
-static EventGroupHandle_t wifi_event_group;
-#define WIFI_CONNECTED_BIT BIT0
-#define BUT_PRESSED BIT1
 
 
 uint16_t apCount = 0;
@@ -44,6 +41,88 @@ const static char http_wifiListEnd[] =
 
 
 
+void wifi_auto_connect(void *pvParameters) 
+{
+	while(true)	
+	{	
+		xEventGroupWaitBits(wifi_event_group, WIFI_AUTO_CONNECT_BIT, pdTRUE,pdTRUE, portMAX_DELAY);
+		xEventGroupClearBits(wifi_event_group, WIFI_SCAN_ENABLE_BIT);
+		esp_wifi_scan_stop();
+		wifi_read_settings();
+		wifi_config_t wifi_config = {
+			.sta = {
+				.ssid = "\0",
+				.password = "\0",
+			},
+		};
+		if(APWifiName != NULL)
+		{
+			strcpy((char*)wifi_config.sta.ssid,APWifiName);
+		}
+		if(APWifiPass != NULL)
+		{
+			strcpy((char*)wifi_config.sta.password,APWifiPass);
+		}
+		
+
+		ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+		esp_wifi_connect();
+		vTaskDelay(10000/portTICK_PERIOD_MS);
+	}
+	
+	vTaskDelete(NULL);
+}
+
+void wifi_read_settings()
+{
+	nvs_handle_t my_handle;
+	esp_err_t ret;
+
+    ret = nvs_open("storage", NVS_READWRITE, &my_handle);
+    if (ret != ESP_OK) {
+        printf("Error (%s) opening NVS handle!\n", esp_err_to_name(ret));
+    } else {
+        size_t req_size;
+        ret = nvs_get_str(my_handle, "SSIDname", NULL, &req_size);
+        switch (ret) {
+            case ESP_OK:
+                printf("Done\n");
+				free(APWifiName);
+				APWifiName = malloc(req_size);
+				ret = nvs_get_str(my_handle, "SSIDname", APWifiName, &req_size);
+				ret = nvs_get_str(my_handle, "SSIDPass", NULL, &req_size);
+				if(ret == ESP_OK)
+				{
+					free(APWifiPass);
+					APWifiPass = malloc(req_size);
+					ret = nvs_get_str(my_handle, "SSIDPass", APWifiPass, &req_size);
+				}
+                break;
+            case ESP_ERR_NVS_NOT_FOUND:
+                printf("The value is not initialized yet!\n");
+                break;
+            default :
+                printf("Error (%s) reading!\n", esp_err_to_name(ret));
+        }
+
+       nvs_close(my_handle);
+    }
+}
+
+void wifi_save_ssid(void* pvParametrs)
+{
+	nvs_handle_t my_handle;
+	esp_err_t ret;
+	ret = nvs_open("storage", NVS_READWRITE, &my_handle);
+    if (ret != ESP_OK) {
+        printf("Error (%s) opening NVS handle!\n", esp_err_to_name(ret));
+    } else {
+		ret = nvs_set_str(my_handle, "SSIDname", APWifiName);
+		ret = nvs_set_str(my_handle, "SSIDPass", APWifiPass);
+		ret = nvs_commit(my_handle);
+	}
+	vTaskDelete(NULL);
+}
 
 void wifi_scan(void *pvParameters) 
 {
@@ -57,6 +136,7 @@ void wifi_scan(void *pvParameters)
 
 	while(true)
 	{
+		xEventGroupWaitBits(wifi_event_group, WIFI_SCAN_ENABLE_BIT, false, true, portMAX_DELAY);
     	ESP_ERROR_CHECK(esp_wifi_scan_start(&scanConf, false));    //The true parameter cause the function to block until
                                                                  //the scan is done.
         vTaskDelay(wifiScanPeriod/ portTICK_PERIOD_MS);
@@ -66,6 +146,14 @@ void wifi_scan(void *pvParameters)
 void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
 {
+	printf("event_if = %d\n",event_id);
+	if(APWifiName!= NULL)
+	{
+		printf("%s\n",APWifiName);
+		printf("%s\n",APWifiPass);
+	}
+
+	EventBits_t wifi_group_status = xEventGroupGetBits(wifi_event_group);
 	switch(event_id)
 	{
 		case SYSTEM_EVENT_SCAN_DONE:
@@ -80,12 +168,16 @@ void wifi_event_handler(void* arg, esp_event_base_t event_base,
 			ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&apCount, list));
 		break;
 		case SYSTEM_EVENT_STA_START:
-			printf("STA START");
+			xEventGroupSetBits(wifi_event_group, WIFI_AUTO_CONNECT_BIT);
 		break;
-		case SYSTEM_EVENT_STA_GOT_IP:
-			printf("STA GOT IP");
-		break;
+
         case SYSTEM_EVENT_STA_DISCONNECTED:
+			
+			if((wifi_group_status & WIFI_CONNECTED_BIT )== 0)
+			{
+				xEventGroupSetBits(wifi_event_group, WIFI_AUTO_CONNECT_BIT|WIFI_SCAN_ENABLE_BIT);
+				break;
+			}
 			xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);	
             wifi_config_t wifi_config = {
                 .sta = {
@@ -96,20 +188,18 @@ void wifi_event_handler(void* arg, esp_event_base_t event_base,
             strcpy((char*)wifi_config.sta.ssid,APWifiName);
             strcpy((char*)wifi_config.sta.password,APWifiPass);
             ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+			xEventGroupClearBits(wifi_event_group, WIFI_SCAN_ENABLE_BIT);
+			esp_wifi_scan_stop();
             esp_wifi_connect();
         break;
 		case SYSTEM_EVENT_STA_CONNECTED:
-			xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+			xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT|WIFI_SCAN_ENABLE_BIT);
+			xEventGroupClearBits(wifi_event_group, WIFI_AUTO_CONNECT_BIT);
+			xTaskCreate(&wifi_save_ssid, "save_ssid", 4096, NULL, 5, NULL);	
 			printf("Connected\n");
 		break;
 	}
-}
-
-
-esp_err_t _http_event_handler(esp_http_client_event_t *evt)
-{
-	printf("httpEvent");
-	return ESP_OK;
+	
 }
 
 
@@ -143,7 +233,9 @@ void wifi_setup()
     if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
+
 	wifi_event_group = xEventGroupCreate();
+	xEventGroupClearBits(wifi_event_group,WIFI_SCAN_ENABLE_BIT|WIFI_CONNECTED_BIT|WIFI_AUTO_CONNECT_BIT);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -210,9 +302,11 @@ void http_server_netconn_serve(struct netconn *conn) {
 					// path - /wifisel?wifi=ZTE_2.4G_kUKE3d&pass=Pass
 					free(APWifiName);
 					free(APWifiPass);
-					int APWifiNamelength = strchr(path, '&') - path - strlen("/wifisel?wifi=") + 1;
-					APWifiName = (char*)malloc(sizeof(char*)*APWifiNamelength);
-					strncpy(APWifiName, &path[strlen("/wifisel?wifi=")], APWifiNamelength -1);
+					
+					int APWifiNamelength = strchr(path, '&') - path - strlen(" /wifisel?wifi=") + 2;
+					printf("1= %d, %p, %p, %d",APWifiNamelength,strchr(path, '&'), path,strlen(" /wifisel?wifi=") );
+					APWifiName = (char*)malloc(sizeof(char*) * APWifiNamelength);
+					strncpy(APWifiName, &path[strlen("/wifisel?wifi=")], APWifiNamelength - 1);
 					APWifiName[APWifiNamelength -1] = '\0';
 					
 					int APWifiPassLength = strlen(path) - (strchr(path, '&') - path) - strlen("pass=");
@@ -222,13 +316,13 @@ void http_server_netconn_serve(struct netconn *conn) {
 
 					// wifi_config_t wifi_config;
 					
-                    
+                    xEventGroupClearBits(wifi_event_group, WIFI_SCAN_ENABLE_BIT);
 					esp_wifi_scan_stop();
+					
                     wifi_ap_record_t ap_info;
                     if(esp_wifi_sta_get_ap_info(&ap_info) == ESP_ERR_WIFI_NOT_CONNECT)
                     {
-                        esp_wifi_disconnect();
-                        printf("\n");
+                        // esp_wifi_disconnect();
                         wifi_config_t wifi_config = {
                             .sta = {
                                 .ssid = "\0",

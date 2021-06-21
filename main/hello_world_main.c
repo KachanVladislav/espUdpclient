@@ -48,8 +48,12 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-    wifi_setup();
 
+
+    wifi_setup();
+  
+
+    xTaskCreate(&wifi_auto_connect, "auto_connect", 8192, NULL, 5, NULL);
     xTaskCreate(&http_server, "http_server", 8192, NULL, 5, NULL);
 	xTaskCreate(&wifi_scan, "wifi_scan", 8192, NULL, 5, NULL);
     while(true){
